@@ -19,7 +19,8 @@ Before following this guide, make sure you have:
 
 - A Raspberry Pi with a desktop environment installed (e.g., Raspberry Pi OS with Desktop)
 - Cloudflare account with a domain already configured
-- `cloudflared` installed on both the **Raspberry Pi (server)** and your **client machine**
+- **Docker** and **Docker Compose** installed on the Raspberry Pi
+- `cloudflared` installed on your **client machine**
 - SSH access already working (as set up in the linked project above)
 
 ---
@@ -60,49 +61,56 @@ Log in with your Pi's username and password. If the desktop loads, local RDP is 
 
 ---
 
-### 3. Create a Cloudflare Tunnel for RDP
+### 3. Create a Cloudflare Tunnel for RDP Using Docker Compose
 
-On your **Raspberry Pi**, create a Cloudflare Tunnel that forwards traffic to the local RDP port:
+Instead of installing `cloudflared` directly on the Pi, the tunnel is run as a **Docker container** using Docker Compose. This keeps the setup clean, portable, and easy to manage.
 
-```bash
-cloudflared tunnel create rdp-tunnel
-```
+#### 3a. Get Your Cloudflare Tunnel Token
 
-Then configure the tunnel. Edit (or create) the tunnel config file:
+1. Go to the [Cloudflare Zero Trust Dashboard](https://one.dash.cloudflare.com/)
+2. Navigate to **Networks → Tunnels → Create a Tunnel**
+3. Choose **Cloudflared** as the connector type
+4. Name your tunnel (e.g., `rdp-tunnel`) and save
+5. Under **Public Hostnames**, add:
+   - **Subdomain**: `rdp`
+   - **Domain**: `yourdomain.com`
+   - **Service Type**: `RDP`
+   - **URL**: `localhost:3389`
+6. Copy the **tunnel token** shown in the install step — you'll need it below
+
+#### 3b. Create the Docker Compose File
+
+On your **Raspberry Pi**, create a `docker-compose.yml` file:
 
 ```yaml
-# ~/.cloudflared/config.yml
+# docker-compose.yml
 
-tunnel: <YOUR_TUNNEL_ID>
-credentials-file: /home/<your-user>/.cloudflared/<YOUR_TUNNEL_ID>.json
-
-ingress:
-  - hostname: rdp.yourdomain.com
-    service: rdp://localhost:3389
-  - service: http_status:404
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-rdp
+    restart: unless-stopped
+    network_mode: host
+    command: tunnel --no-autoupdate run --token <YOUR_TUNNEL_TOKEN>
 ```
 
-> Replace `rdp.yourdomain.com` with a subdomain you control on Cloudflare.
+> Replace `<YOUR_TUNNEL_TOKEN>` with the token copied from the Cloudflare dashboard.
+>
+> `network_mode: host` is important — it allows the container to reach `localhost:3389` (your Pi's xrdp service) directly.
 
-Route your domain to the tunnel:
+#### 3c. Start the Tunnel
 
 ```bash
-cloudflared tunnel route dns rdp-tunnel rdp.yourdomain.com
+docker compose up -d
 ```
 
-Start the tunnel:
+Verify the container is running:
 
 ```bash
-cloudflared tunnel run rdp-tunnel
+docker compose logs -f
 ```
 
-To run it as a persistent background service:
-
-```bash
-sudo cloudflared service install
-sudo systemctl start cloudflared
-sudo systemctl enable cloudflared
-```
+You should see a message confirming the tunnel is connected to Cloudflare's network. The tunnel will automatically restart on reboot thanks to `restart: unless-stopped`.
 
 ---
 
